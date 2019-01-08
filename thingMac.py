@@ -9,6 +9,7 @@ import traceback
 import zipfile
 
 from Tkinter import *
+from VerticalScrolledFrame import *
 
 import irc.client
 
@@ -168,57 +169,9 @@ def processFile(filename):
     return available
 
 
-# https://stackoverflow.com/questions/31762698/dynamic-button-with-scrollbar-in-tkinter-python
-class VerticalScrolledFrame(Frame):
-    """A pure Tkinter scrollable frame that actually works!
-
-    * Use the 'interior' attribute to place widgets inside the scrollable frame
-    * Construct and pack/place/grid normally
-    * This frame only allows vertical scrolling
-    """
-    def __init__(self, parent, *args, **kw):
-        Frame.__init__(self, parent, *args, **kw)
-
-        # create a canvas object and a vertical scrollbar for scrolling it
-        vscrollbar = Scrollbar(self, orient=VERTICAL)
-        vscrollbar.pack(fill=Y, side=RIGHT, expand=FALSE)
-        canvas = Canvas(self, bd=0, highlightthickness=0,
-                        yscrollcommand=vscrollbar.set)
-        canvas.pack(side=LEFT, fill=BOTH, expand=TRUE)
-        vscrollbar.config(command=canvas.yview)
-
-        # reset the view
-        canvas.xview_moveto(0)
-        canvas.yview_moveto(0)
-
-        # create a frame inside the canvas which will be scrolled with it
-        self.interior = interior = Frame(canvas)
-        interior_id = canvas.create_window(0, 0, window=interior,
-                                           anchor=NW)
-
-        # track changes to the canvas and frame width and sync them,
-        # also updating the scrollbar
-        def _configure_interior(event):
-            # update the scrollbars to match the size of the inner frame
-            size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
-            canvas.config(scrollregion="0 0 %s %s" % size)
-            if interior.winfo_reqwidth() != canvas.winfo_width():
-                # update the canvas's width to fit the inner frame
-                canvas.config(width=interior.winfo_reqwidth())
-
-        interior.bind('<Configure>', _configure_interior)
-
-        def _configure_canvas(event):
-            if interior.winfo_reqwidth() != canvas.winfo_width():
-                # update the inner frame's width to fill the canvas
-                canvas.itemconfigure(interior_id, width=canvas.winfo_width())
-
-        canvas.bind('<Configure>', _configure_canvas)
-
-
 client = None
 elements = []
-searchField, optionsPanel, gfilter, scframe = None, None, None, None
+searchField, optionsPanel, optionsFilter, optionsList = None, None, None, None
 
 def buttonPress(user, file):
     tLog("GUI", "ButtonPress for user {}, file {}".format(user, file))
@@ -227,7 +180,7 @@ def buttonPress(user, file):
     client.send_channel(command)
 
 def updateFilter():
-    limit = int(gfilter.get())
+    limit = int(optionsFilter.get())
     tLog("GUI", "Limit: {}".format(limit))
 
     # hide all elements, show the ones that pass the filter
@@ -243,7 +196,7 @@ def updateFilter():
             nrow += 1
 
 def doSearch():
-    global elements, gfilter
+    global elements, optionsFilter
     searchText = searchField.get()
     tLog("GUI", "Do search for: {}".format(searchText))
     searchField.delete(0,END)
@@ -270,24 +223,24 @@ def doSearch():
             maxPeople = len(available[key])
 
     # create filter and buttons
-    if gfilter is None:
-        gfilter = Spinbox(optionsPanel, from_=1, to=maxPeople, command=updateFilter)
-        gfilter.pack(side=TOP, anchor='w')
+    if optionsFilter is None:
+        optionsFilter = Spinbox(optionsPanel, from_=1, to=maxPeople, command=updateFilter)
+        optionsFilter.pack(side=TOP, anchor='w')
     else:
-        gfilter.config(to=maxPeople)
-    scframe.pack(side=TOP, expand=YES, fill=BOTH)
+        optionsFilter.config(to=maxPeople)
+    optionsList.pack(side=TOP, expand=YES, fill=BOTH)
     nrow = 0
     for key in sorted(available.iterkeys()):
         ncol = 0
         elements.append([])
         people = list(available[key])
-        label = Label(scframe.interior, justify=LEFT, anchor='w', text=key)
+        label = Label(optionsList, justify=LEFT, anchor='w', text=key)
         label.grid(row=nrow, column=ncol, sticky=W+E)
         elements[nrow].append(label)
 
         for person in people:
             ncol += 1
-            button = Button(scframe.interior, text=person, command=lambda file=key, user=person: buttonPress(user, file))
+            button = Button(optionsList, text=person, command=lambda file=key, user=person: buttonPress(user, file))
             button.grid(row=nrow, column=ncol, sticky=W+E)
             elements[nrow].append(button)
 
@@ -295,7 +248,7 @@ def doSearch():
 
 
 def makeGUI():
-    global searchField, optionsPanel, scframe
+    global searchField, optionsPanel, optionsList
     tLog("GUI", "Creating gui")
 
     root = Tk()
@@ -304,7 +257,7 @@ def makeGUI():
     but = Button(row, text='Search', command=doSearch)
 
     optionsPanel = Frame(root)
-    scframe = VerticalScrolledFrame(optionsPanel)
+    optionsList = VerticalScrolledFrame(optionsPanel)
 
     row.pack(side=TOP, fill=X)
     searchField.pack(side=LEFT, expand=YES, fill=X)
