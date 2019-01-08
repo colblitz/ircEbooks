@@ -46,7 +46,8 @@ class IRCCat(irc.client.SimpleIRCClient):
         connection.join(self.target)
 
     def on_join(self, connection, event):
-        self.log("Joined")
+        if event.source.nick == BOT_NICK:
+            self.log("Joined channel")
 
     def send_privmsg(self, message):
         self.log("Pming {}: {}".format(self.handler, message))
@@ -108,8 +109,6 @@ class IRCCat(irc.client.SimpleIRCClient):
         sys.exit(0)
 
 
-
-
 class ClientThread(threading.Thread):
     def log(self, s):
         tLog(self.getName(), s)
@@ -136,15 +135,15 @@ class ClientThread(threading.Thread):
 
 def processFile(filename):
     newfile = filename[:-4]
-    tLog("Processor", "unzipping")
+    tLog("Processor", "Unzipping file")
     with zipfile.ZipFile(filename) as zf, open(newfile, 'w') as f:
         if len(zf.namelist()) > 1:
-            print "Oh no"
-            return
+            tLog("Processor", "File format has changed, more than one file in search zip")
+            sys.exit(1)
         txtfile = zf.namelist()[0]
         f.write(zf.read(txtfile))
 
-    tLog("Processor", "parsing")
+    tLog("Processor", "Parsing file")
     available = {}
     with open(newfile, 'r') as f:
         for line in f:
@@ -152,33 +151,19 @@ def processFile(filename):
                 continue
             if 'epub' not in line.lower():
                 continue
-            # print list(line)
             i1 = line.find(' ')
             i2 = line.find('::')
             if i2 == -1:
                 i2 = line.find('\r')
-            # print i2
             user = line[:i1]
             file = line[i1:i2].strip()
-
-            i3 = file.rfind('.')
-            fname = file[:i3]
-            ftype = file[i3:]
 
             if file not in available:
                 available[file] = set()
             available[file].add(user.replace("!", ""))
 
-            # print "START", user, "##########", file
-
-    tLog("Processor", "got {} unique options".format(len(available)))
-    # for key in sorted(available.iterkeys()):
-    #     print "{:100} | {}".format(key, list(available[key]))
-    # tLog("PROCESSOR", "got {} unique options".format(len(available)))
-
-    # print "done processing file"
+    tLog("Processor", "Got {} unique options".format(len(available)))
     return available
-
 
 
 # https://stackoverflow.com/questions/31762698/dynamic-button-with-scrollbar-in-tkinter-python
@@ -229,47 +214,19 @@ class VerticalScrolledFrame(Frame):
         canvas.bind('<Configure>', _configure_canvas)
 
 
-# root = Tk()
-# root.title("Scrollable Frame Demo")
-# root.configure(background="gray99")
-
-
-
-# lis = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
-# for i, x in enumerate(lis):
-#     btn = tk.Button(scframe.interior, height=1, width=20, relief=tk.FLAT,
-#         bg="gray99", fg="purple3",
-#         font="Dosis", text='Button ' + lis[i],
-#         command=lambda i=i,x=x: openlink(i))
-#     btn.pack(padx=10, pady=5, side=tk.TOP)
-
-# def openlink(i):
-#     print lis[i]
-
-# root.mainloop()
-
-
-
-
-
 client = None
-buttons = []
-buttonValues = {}
 elements = []
-searchField = None
-gfilter = None
+searchField, optionsPanel, gfilter, scframe = None, None, None, None
 
 def buttonPress(user, file):
-    tLog("GUI", "buttonPress for user {}, file {}".format(user, file))
+    tLog("GUI", "ButtonPress for user {}, file {}".format(user, file))
     command = "!{} {}".format(user, file)
-    tLog("GUI", "command would be: {}".format(command))
-    global client
+    tLog("GUI", "Command: {}".format(command))
     client.send_channel(command)
 
-def updateValue():
-    global buttons, buttonValues, gfilter, elements
+def updateFilter():
     limit = int(gfilter.get())
-    tLog("GUI", "limit: {}".format(limit))
+    tLog("GUI", "Limit: {}".format(limit))
 
     nrow = 0
     for r in elements:
@@ -282,23 +239,16 @@ def updateValue():
                 ncol += 1
             nrow += 1
 
-    # for b in buttons:
-    #     b.pack_forget()
-    #     if len(buttonValues[b]) >= limit:
-    #         b.pack(side=TOP)
-
 def doSearch():
-    global client, buttons, buttonValues, searchField, gfilter, elements
+    global elements, gfilter
     searchText = searchField.get()
     tLog("GUI", "doSearch: {}".format(searchText))
     searchField.delete(0,END)
 
     # reset buttons
-    if gfilter is not None:
-        gfilter.destroy()
-    for b in buttons:
-        b.destroy()
-    buttonValues = {}
+    for r in elements:
+        for e in r:
+            e.destroy()
     elements = []
 
     tLog("GUI", "sending to client")
@@ -316,17 +266,19 @@ def doSearch():
         if len(available[key]) > maxPeople:
             maxPeople = len(available[key])
 
-    w = Spinbox(optionsPanel, from_=1, to=maxPeople, command=updateValue)
-    w.pack(side=TOP, anchor='w')
-    gfilter = w
+    # create filter and buttons
+    if gfilter is None:
+        gfilter = Spinbox(optionsPanel, from_=1, to=maxPeople, command=updateFilter)
+        gfilter.pack(side=TOP, anchor='w')
+    else:
+        gfilter.config(to=maxPeople)
     scframe.pack(side=TOP, expand=YES, fill=BOTH)
     nrow = 0
     for key in sorted(available.iterkeys()):
         ncol = 0
         elements.append([])
-        label = key
         people = list(available[key])
-        label = Label(scframe.interior, justify=LEFT, anchor='w', text=label)
+        label = Label(scframe.interior, justify=LEFT, anchor='w', text=key)
         label.grid(row=nrow, column=ncol, sticky=W+E)
         elements[nrow].append(label)
 
@@ -339,48 +291,22 @@ def doSearch():
         nrow += 1
 
 
-
-
-
-        # label = "({}) {}".format(len(available[key]), key)
-        # people = list(available[key])
-        # tk.Label(root, text="Hello Tkinter!")
-        # button = Button(scframe.interior, anchor="w", text=label, command=lambda text = people: buttonPress(people))
-        # button.pack(side=TOP)
-        # buttons.append(button)
-        # buttonValues[button] = people
-
-
-    #     print "{:100} | {}".format(key, list(available[key]))
-
-    # for a in range(random.randint(5, 20)):
-    #     l = range(random.randint(1, 5))
-    #     button = Button(optionsPanel, text=str(a)+str(l), command=lambda text = str(a)+str(l): buttonPress(text))
-    #     button.pack(side=TOP)
-    #     buttons.append(button)
-    #     buttonValues[button] = l
-
-
 def makeGUI():
     global searchField, optionsPanel, scframe
-
     tLog("GUI", "creating gui")
 
     root = Tk()
     row = Frame(root)
-    ent = Entry(row)
-    searchField = ent
+    searchField = Entry(row)
     but = Button(row, text='Search', command=doSearch)
 
-    options = Frame(root)
-    optionsPanel = options
-    scframe = VerticalScrolledFrame(options)
+    optionsPanel = Frame(root)
+    scframe = VerticalScrolledFrame(optionsPanel)
 
     row.pack(side=TOP, fill=X)
-    ent.pack(side=LEFT, expand=YES, fill=X)
+    searchField.pack(side=LEFT, expand=YES, fill=X)
     but.pack(side=RIGHT)
-    options.pack(side=TOP, expand=YES, fill=BOTH)
-    # root.bind('<Return>', (lambda event, e=ents: fetch(e)))
+    optionsPanel.pack(side=TOP, expand=YES, fill=BOTH)
     root.bind('<Return>', (lambda event: doSearch()))
 
     root.mainloop()
@@ -391,25 +317,9 @@ if __name__ == "__main__":
     clientThread.daemon = True
     clientThread.start()
 
+    tLog("Main", "Waiting 35 seconds before creating GUI")
     time.sleep(35)
     client = clientThread.getClient()
 
     makeGUI()
-    print "after"
-#     guiThread = GuiThread(c, name="GuiThread")
-#     guiThread.daemon = True
-#     guiThread.start()
-
-#     # # c.send_privmsg("hi after 10 seconds")
-#     # # time.sleep(10)
-#     # # c.send_privmsg("hi again after 10 seconds")
-#     # # c.do_search("terry brooks")
-#     while True:
-#         time.sleep(1)
-
-    # filename = "SearchBot_results_for__adrian_tchaikovsky.txt.zip"
-    # unzipFile(filename)
-    # txtName = filename[:-4]
-    # print txtName
-    # parseFile(txtName)
-    # processFile(filename)
+    tLog("Main", "End of Main")

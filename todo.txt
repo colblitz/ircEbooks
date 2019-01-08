@@ -2,3 +2,5 @@
  - add text find feature
  - add a queue for getting books (one at a time)
  - add a queue for doing searches
+ - limit really long titles
+ - specify working directory
