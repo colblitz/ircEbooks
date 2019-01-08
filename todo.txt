@@ -4,3 +4,4 @@
  - add a queue for doing searches
  - limit really long titles
  - specify working directory
+ - get random nick (fetcher7325)

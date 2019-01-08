@@ -33,6 +33,7 @@ class IRCCat(irc.client.SimpleIRCClient):
         self.handler = handler
         self.latestFile = None
         self.latestFilename = None
+        # https://github.com/gehaxelt/python-rss2irc/pull/25
         self.connection.buffer_class.errors = 'replace'
 
     def log(self, s):
@@ -50,7 +51,7 @@ class IRCCat(irc.client.SimpleIRCClient):
             self.log("Joined channel")
 
     def send_privmsg(self, message):
-        self.log("Pming {}: {}".format(self.handler, message))
+        self.log("Pming {}: \"{}\"".format(self.handler, message))
         self.connection.privmsg(self.handler, message)
 
     def send_channel(self, message):
@@ -61,7 +62,8 @@ class IRCCat(irc.client.SimpleIRCClient):
         self.latestFile = None
         self.latestFilename = None
         message = "@search {}".format(searchText)
-        self.log("Doing search for {}".format(message))
+        self.log("Searching for \"{}\"".format(searchText))
+        self.log("To channel {}: \"{}\"".format(self.target, message))
         self.connection.privmsg(self.target, message)
 
     def on_privmsg(self, connection, event):
@@ -228,6 +230,7 @@ def updateFilter():
     limit = int(gfilter.get())
     tLog("GUI", "Limit: {}".format(limit))
 
+    # hide all elements, show the ones that pass the filter
     nrow = 0
     for r in elements:
         ncol = 0
@@ -242,7 +245,7 @@ def updateFilter():
 def doSearch():
     global elements, gfilter
     searchText = searchField.get()
-    tLog("GUI", "doSearch: {}".format(searchText))
+    tLog("GUI", "Do search for: {}".format(searchText))
     searchField.delete(0,END)
 
     # reset buttons
@@ -251,14 +254,14 @@ def doSearch():
             e.destroy()
     elements = []
 
-    tLog("GUI", "sending to client")
+    tLog("GUI", "Sending to client")
     client.do_search(searchText)
 
     # wait until we got the file
     while client.latestFile is None:
-        tLog("GUI", "waiting for file...")
+        tLog("GUI", "Waiting for file...")
         time.sleep(2)
-    tLog("GUI", "got file, going to process")
+    tLog("GUI", "Got file, going to process")
 
     available = processFile(client.latestFilename)
     maxPeople = 0
@@ -293,7 +296,7 @@ def doSearch():
 
 def makeGUI():
     global searchField, optionsPanel, scframe
-    tLog("GUI", "creating gui")
+    tLog("GUI", "Creating gui")
 
     root = Tk()
     row = Frame(root)
