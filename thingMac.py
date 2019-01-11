@@ -8,6 +8,7 @@ import time
 import traceback
 import zipfile
 
+from collections import deque
 from Tkinter import *
 from VerticalScrolledFrame import *
 
@@ -26,16 +27,46 @@ def tLog(tName, s):
     sys.stdout.write("[{} {:12}] {}\n".format(t, tName, s))
     sys.stdout.flush()
 
+
+class QueueThread(threading.Thread):
+    def __init__(self, client, name=None):
+        super(QueueThread, self).__init__(name=name)
+        self.client = client
+        self.count = 0
+
+    def log(self, s):
+        tLog("Queue", s)
+
+    def debug(self, s):
+        if DEBUG:
+            self.log(s)
+
+    def run(self):
+        while 1:
+            if not self.client.waitingForFile and len(self.client.queue) > 0:
+                self.log("Found book in queue, not waiting for file")
+                client.get_book_from_queue()
+            time.sleep(1)
+            self.count += 1
+            if self.count % 10 == 0:
+                self.debug("Waiting, queue size {}".format(len(self.client.queue)))
+
 class IRCCat(irc.client.SimpleIRCClient):
     def __init__(self, target, handler):
         irc.client.SimpleIRCClient.__init__(self)
         self.target = target
         self.received_bytes = 0
         self.handler = handler
+
+        self.waitingForFile = None
         self.latestFile = None
         self.latestFilename = None
+
         # https://github.com/gehaxelt/python-rss2irc/pull/25
         self.connection.buffer_class.errors = 'replace'
+
+        self.queue = deque()
+        self.done = []
 
     def log(self, s):
         tLog("Client", s)
@@ -55,17 +86,30 @@ class IRCCat(irc.client.SimpleIRCClient):
         self.log("Pming {}: \"{}\"".format(self.handler, message))
         self.connection.privmsg(self.handler, message)
 
+    def get_book(self, message):
+        if self.waitingForFile:
+            self.queue.append(message)
+        else:
+            self.send_channel(message)
+            self.waitingForFile = "Book"
+
+    def get_book_from_queue(self):
+        if self.waitingForFile:
+            self.log("Can't get book from queue, already waiting for file")
+            return
+        self.send_channel(self.queue.popleft())
+        self.waitingForFile = "Book"
+
     def send_channel(self, message):
         self.log("To channel {}: {}".format(self.target, message))
         self.connection.privmsg(self.target, message)
 
     def do_search(self, searchText):
-        self.latestFile = None
-        self.latestFilename = None
         message = "@search {}".format(searchText)
         self.log("Searching for \"{}\"".format(searchText))
         self.log("To channel {}: \"{}\"".format(self.target, message))
         self.connection.privmsg(self.target, message)
+        self.waitingForFile = "Search"
 
     def on_privmsg(self, connection, event):
         message = event.arguments[0]
@@ -78,11 +122,14 @@ class IRCCat(irc.client.SimpleIRCClient):
             self.do_search("terry brooks")
 
     def on_ctcp(self, connection, event):
-        self.debug(event)
+        if event.target == BOT_NICK:
+            self.log(event)
         payload = event.arguments[1]
         if "SEND" not in payload:
             return
-        parts = shlex.split(payload)
+        lex = shlex.shlex(payload)
+        lex.whitespace_split = True
+        parts = list(lex)
         command, filename, peer_address, peer_port, size = parts
         if command != "SEND":
             return
@@ -97,6 +144,7 @@ class IRCCat(irc.client.SimpleIRCClient):
 
     def on_dccmsg(self, connection, event):
         data = event.arguments[0]
+        self.debug("Got {} bytes in dcc msg".format(len(data)))
         self.file.write(data)
         self.received_bytes = self.received_bytes + len(data)
         self.dcc.send_bytes(struct.pack("!I", self.received_bytes))
@@ -104,8 +152,19 @@ class IRCCat(irc.client.SimpleIRCClient):
     def on_dcc_disconnect(self, connection, event):
         self.file.close()
         self.latestFile = self.file
-        self.log("Received file {} ({} bytes).".format(self.filename, self.received_bytes))
+        if self.waitingForFile == "Search":
+            self.log("Received search {} ({} bytes).".format(self.filename, self.received_bytes))
+        elif self.waitingForFile == "Book":
+            self.log("Received book {} ({} bytes).".format(self.filename, self.received_bytes))
+            self.done.append(self.latestFilename)
+        else:
+            self.log("Received file {} ({} bytes).".format(self.filename, self.received_bytes))
+        self.waitingForFile = None
+        self.received_bytes = 0
         # ?? - self.connection.quit()
+
+    def getStatus(self):
+        return "{} done, {} left".format(len(self.done), len(self.queue))
 
     def on_disconnect(self, connection, event):
         self.log("Disconnecting")
@@ -137,37 +196,41 @@ class ClientThread(threading.Thread):
         return self.client
 
 def processFile(filename):
-    newfile = filename[:-4]
-    tLog("Processor", "Unzipping file")
-    with zipfile.ZipFile(filename) as zf, open(newfile, 'w') as f:
-        if len(zf.namelist()) > 1:
-            tLog("Processor", "File format has changed, more than one file in search zip")
-            sys.exit(1)
-        txtfile = zf.namelist()[0]
-        f.write(zf.read(txtfile))
+    try:
+        newfile = filename[:-4]
+        tLog("Processor", "Unzipping file")
+        with zipfile.ZipFile(filename) as zf, open(newfile, 'w') as f:
+            if len(zf.namelist()) > 1:
+                tLog("Processor", "File format has changed, more than one file in search zip")
+                sys.exit(1)
+            txtfile = zf.namelist()[0]
+            f.write(zf.read(txtfile))
 
-    tLog("Processor", "Parsing file")
-    available = {}
-    with open(newfile, 'r') as f:
-        for line in f:
-            if line[0] != '!':
-                continue
-            if 'epub' not in line.lower():
-                continue
-            i1 = line.find(' ')
-            i2 = line.find('::')
-            if i2 == -1:
-                i2 = line.find('\r')
-            user = line[:i1]
-            file = line[i1:i2].strip()
+        tLog("Processor", "Parsing file")
+        available = {}
+        with open(newfile, 'r') as f:
+            for line in f:
+                if line[0] != '!':
+                    continue
+                if 'epub' not in line.lower():
+                    continue
+                i1 = line.find(' ')
+                i2 = line.find('::')
+                if i2 == -1:
+                    i2 = line.find('\r')
+                user = line[:i1]
+                file = line[i1:i2].strip()
 
-            if file not in available:
-                available[file] = set()
-            available[file].add(user.replace("!", ""))
+                if file not in available:
+                    available[file] = set()
+                available[file].add(user.replace("!", ""))
 
-    tLog("Processor", "Got {} unique options".format(len(available)))
-    return available
-
+        tLog("Processor", "Got {} unique options".format(len(available)))
+        return available
+    except Exception as e:
+        tLog("Processor", "Error processing file")
+        tLog("Processor", str(E))
+        return {}
 
 client = None
 elements = []
@@ -177,7 +240,8 @@ def buttonPress(user, file):
     tLog("GUI", "ButtonPress for user {}, file {}".format(user, file))
     command = "!{} {}".format(user, file)
     tLog("GUI", "Command: {}".format(command))
-    client.send_channel(command)
+    client.get_book(command)
+    # client.send_channel(command)
 
 def updateFilter():
     limit = int(optionsFilter.get())
@@ -197,6 +261,9 @@ def updateFilter():
 
 def doSearch():
     global elements, optionsFilter
+    if client.waitingForFile:
+        tLog("GUI", "Waiting for file, can't search yet")
+        return
     searchText = searchField.get()
     tLog("GUI", "Do search for: {}".format(searchText))
     searchField.delete(0,END)
@@ -211,9 +278,9 @@ def doSearch():
     client.do_search(searchText)
 
     # wait until we got the file
-    while client.latestFile is None:
+    while client.waitingForFile == "Search":
         tLog("GUI", "Waiting for file...")
-        time.sleep(2)
+        time.sleep(1)
     tLog("GUI", "Got file, going to process")
 
     available = processFile(client.latestFilename)
@@ -247,12 +314,21 @@ def doSearch():
         nrow += 1
 
 
+def updateStatus():
+    global root, status
+    status["text"] = client.getStatus()
+    root.after(200, updateStatus)
+
+
 def makeGUI():
-    global searchField, optionsPanel, optionsList
+    global root, searchField, optionsPanel, optionsList, status
     tLog("GUI", "Creating gui")
 
     root = Tk()
     row = Frame(root)
+
+    status = Label(row, text="0/0")
+
     searchField = Entry(row)
     but = Button(row, text='Search', command=doSearch)
 
@@ -260,11 +336,14 @@ def makeGUI():
     optionsList = VerticalScrolledFrame(optionsPanel)
 
     row.pack(side=TOP, fill=X)
+    status.pack(side=LEFT)
     searchField.pack(side=LEFT, expand=YES, fill=X)
     but.pack(side=RIGHT)
+
     optionsPanel.pack(side=TOP, expand=YES, fill=BOTH)
     root.bind('<Return>', (lambda event: doSearch()))
 
+    root.after(1, updateStatus)
     root.mainloop()
 
 
@@ -275,7 +354,16 @@ if __name__ == "__main__":
 
     tLog("Main", "Waiting 35 seconds before creating GUI")
     time.sleep(35)
+    # time.sleep(35)
     client = clientThread.getClient()
+
+    queueThread = QueueThread(client, name="QueueThread")
+    queueThread.daemon = True
+    queueThread.start()
+
+    # background = BackgroundThread(name="BackgroundThread")
+    # background.daemon = True
+    # background.start()
 
     makeGUI()
     tLog("Main", "End of Main")
