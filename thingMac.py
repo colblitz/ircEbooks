@@ -16,6 +16,8 @@ import irc.client
 
 DEBUG = False
 
+WORKING_DIRECTORY = "ebooks"
+
 IRC_SERVER = "irc.irchighway.net"
 IRC_PORT = 6667
 IRC_CHANNEL = "#ebooks"
@@ -66,6 +68,7 @@ class IRCCat(irc.client.SimpleIRCClient):
         self.connection.buffer_class.errors = 'replace'
 
         self.queue = deque()
+        self.queued = 0
         self.done = []
 
     def log(self, s):
@@ -82,11 +85,19 @@ class IRCCat(irc.client.SimpleIRCClient):
         if event.source.nick == BOT_NICK:
             self.log("Joined channel")
 
+    def checkIsOn(self, names):
+        self.usersOn = []
+        self.connection.ison(names)
+
+    def on_ison(self, connection, event):
+        self.usersOn = event.arguments[0].split()
+
     def send_privmsg(self, message):
         self.log("Pming {}: \"{}\"".format(self.handler, message))
         self.connection.privmsg(self.handler, message)
 
     def get_book(self, message):
+        self.queued += 1
         if self.waitingForFile:
             self.queue.append(message)
         else:
@@ -135,8 +146,11 @@ class IRCCat(irc.client.SimpleIRCClient):
             return
 
         self.log("Got send request from {} for {}".format(event.source.nick, filename))
-        self.filename = os.path.basename(filename)
-        self.latestFilename = filename
+        if filename[0] == "\"" and filename[-1] == "\"":
+            filename = filename[1:-1]
+        self.filename = os.path.join(WORKING_DIRECTORY, os.path.basename(filename))
+        self.log("Saving to {}".format(self.filename))
+        self.latestFilename = self.filename
         self.file = open(self.filename, "wb")
         peer_address = irc.client.ip_numstr_to_quad(peer_address)
         peer_port = int(peer_port)
@@ -164,7 +178,7 @@ class IRCCat(irc.client.SimpleIRCClient):
         # ?? - self.connection.quit()
 
     def getStatus(self):
-        return "{} done, {} left".format(len(self.done), len(self.queue))
+        return "{} done, {} left".format(len(self.done), self.queued - len(self.done))
 
     def on_disconnect(self, connection, event):
         self.log("Disconnecting")
@@ -229,7 +243,7 @@ def processFile(filename):
         return available
     except Exception as e:
         tLog("Processor", "Error processing file")
-        tLog("Processor", str(E))
+        tLog("Processor", str(e))
         return {}
 
 client = None
@@ -240,7 +254,7 @@ def buttonPress(user, file):
     tLog("GUI", "ButtonPress for user {}, file {}".format(user, file))
     command = "!{} {}".format(user, file)
     tLog("GUI", "Command: {}".format(command))
-    client.get_book(command)
+    client.get_book(unicode(command))
     # client.send_channel(command)
 
 def updateFilter():
@@ -256,6 +270,7 @@ def updateFilter():
         if len(r) - 1 >= limit:
             for e in r:
                 e.grid(row=nrow, column=ncol, sticky=W+E)
+                e.configure(bg = darkerColor) if nrow % 2 == 0 else e.configure(bg = defaultColor)
                 ncol += 1
             nrow += 1
 
@@ -284,17 +299,29 @@ def doSearch():
     tLog("GUI", "Got file, going to process")
 
     available = processFile(client.latestFilename)
+
+    if len(available) == 0:
+        return
+
     maxPeople = 0
+    allPeople = set()
     for key in available:
+        allPeople.update(available[key])
         if len(available[key]) > maxPeople:
             maxPeople = len(available[key])
 
+    client.checkIsOn(allPeople)
+    while client.usersOn == []:
+        time.sleep(1)
+    onlineUsers = set(client.usersOn)
+
     # create filter and buttons
     if optionsFilter is None:
-        optionsFilter = Spinbox(optionsPanel, from_=1, to=maxPeople, command=updateFilter)
+        optionsFilter = Spinbox(optionsPanel, from_=0, to=maxPeople, command=updateFilter)
         optionsFilter.pack(side=TOP, anchor='w')
     else:
         optionsFilter.config(to=maxPeople)
+        optionsFilter.selection_clear()
     optionsList.pack(side=TOP, expand=YES, fill=BOTH)
     nrow = 0
     for key in sorted(available.iterkeys()):
@@ -302,6 +329,8 @@ def doSearch():
         elements.append([])
         people = list(available[key])
         label = Label(optionsList, justify=LEFT, anchor='w', text=key)
+        label.configure(bg = darkerColor) if nrow % 2 == 0 else label.configure(bg = defaultColor)
+
         label.grid(row=nrow, column=ncol, sticky=W+E)
         elements[nrow].append(label)
 
@@ -309,10 +338,47 @@ def doSearch():
             ncol += 1
             button = Button(optionsList, text=person, command=lambda file=key, user=person: buttonPress(user, file))
             button.grid(row=nrow, column=ncol, sticky=W+E)
+            button.configure(bg = darkerColor) if nrow % 2 == 0 else button.configure(bg = defaultColor)
+            if not (person in onlineUsers):
+                button.configure(state=DISABLED)
             elements[nrow].append(button)
 
         nrow += 1
 
+def clamp(val, minimum=0, maximum=255):
+    if val < minimum:
+        return minimum
+    if val > maximum:
+        return maximum
+    return val
+
+def colorscale(hexstr, scalefactor):
+    """
+    Scales a hex string by ``scalefactor``. Returns scaled hex string.
+
+    To darken the color, use a float value between 0 and 1.
+    To brighten the color, use a float value greater than 1.
+
+    >>> colorscale("#DF3C3C", .5)
+    #6F1E1E
+    >>> colorscale("#52D24F", 1.6)
+    #83FF7E
+    >>> colorscale("#4F75D2", 1)
+    #4F75D2
+    """
+
+    hexstr = hexstr.strip('#')
+
+    if scalefactor < 0 or len(hexstr) != 6:
+        return hexstr
+
+    r, g, b = int(hexstr[:2], 16), int(hexstr[2:4], 16), int(hexstr[4:], 16)
+
+    r = clamp(r * scalefactor)
+    g = clamp(g * scalefactor)
+    b = clamp(b * scalefactor)
+
+    return "#%02x%02x%02x" % (r, g, b)
 
 def updateStatus():
     global root, status
@@ -321,11 +387,14 @@ def updateStatus():
 
 
 def makeGUI():
-    global root, searchField, optionsPanel, optionsList, status
+    global root, defaultColor, darkerColor, searchField, optionsPanel, optionsList, status
     tLog("GUI", "Creating gui")
 
     root = Tk()
     row = Frame(root)
+
+    defaultColor = root.cget("bg")
+    darkerColor = colorscale(defaultColor, 0.9)
 
     status = Label(row, text="0/0")
 

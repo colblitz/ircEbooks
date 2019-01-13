@@ -1,7 +1,6 @@
- - scroll wheel doesn't work
- - add text find feature
- - add a queue for getting books (one at a time)
+ - find way to reset filter between searches (clear selection doesn't work)
+ - find way to cancel something (if offline or just slow)
+ - add text filter
  - add a queue for doing searches
  - limit really long titles
  - specify working directory
- - get random nick (fetcher7325)
