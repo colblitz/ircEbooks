@@ -21,7 +21,7 @@ WORKING_DIRECTORY = "ebooks"
 IRC_SERVER = "irc.irchighway.net"
 IRC_PORT = 6667
 IRC_CHANNEL = "#ebooks"
-BOT_NICK = "fetcher"
+BOT_NICK = "fetcher" + str(random.randint(1000, 9999))
 HANDLER = "colblitz"
 
 def tLog(tName, s):
@@ -316,13 +316,13 @@ def doSearch():
     onlineUsers = set(client.usersOn)
 
     # create filter and buttons
-    if optionsFilter is None:
-        optionsFilter = Spinbox(optionsPanel, from_=0, to=maxPeople, command=updateFilter)
-        optionsFilter.pack(side=TOP, anchor='w')
-    else:
-        optionsFilter.config(to=maxPeople)
-        optionsFilter.selection_clear()
+    if not (optionsFilter is None):
+        optionsFilter.destroy()
+    optionsList.pack_forget()
+    optionsFilter = Spinbox(optionsPanel, from_=0, to=maxPeople, command=updateFilter)
+    optionsFilter.pack(side=TOP, anchor='w')
     optionsList.pack(side=TOP, expand=YES, fill=BOTH)
+
     nrow = 0
     for key in sorted(available.iterkeys()):
         ncol = 0
