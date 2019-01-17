@@ -1,6 +1,8 @@
- - find way to reset filter between searches (clear selection doesn't work)
  - find way to cancel something (if offline or just slow)
  - add text filter
  - add a queue for doing searches
  - limit really long titles
  - specify working directory
+ - pm that they don't have book doesn't work (?)
+ - limit by person
+ - side panel for what's in queue/already been requested (or grey out lines that have been requested)
