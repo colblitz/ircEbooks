@@ -26,7 +26,7 @@ HANDLER = "colblitz"
 
 def tLog(tName, s):
     t = time.strftime("%H:%M:%S", time.gmtime())
-    sys.stdout.write("[{} {:12}] {}\n".format(t, tName, s))
+    sys.stdout.write(unicode("[{} {:12}] {}\n").format(t, tName, s))
     sys.stdout.flush()
 
 
@@ -131,6 +131,16 @@ class IRCCat(irc.client.SimpleIRCClient):
             sys.exit(0)
         elif message == "try":
             self.do_search("terry brooks")
+
+    def on_notice(self, connection, event):
+        self.log("got notice: {}".format(event))
+
+    def on_privnotice(self, connection, event):
+        message = event.arguments[0]
+        if event.target == BOT_NICK:
+            self.log(unicode("Got priv notice from {}: {}").format(event.source.nick, message))
+        if "returned no matches" in message:
+            self.waitingForFile = "NoResults"
 
     def on_ctcp(self, connection, event):
         if event.target == BOT_NICK:
@@ -296,6 +306,9 @@ def doSearch():
     while client.waitingForFile == "Search":
         tLog("GUI", "Waiting for file...")
         time.sleep(1)
+    if client.waitingForFile == "NoResults":
+        client.waitingForFile = None
+        return
     tLog("GUI", "Got file, going to process")
 
     available = processFile(client.latestFilename)
