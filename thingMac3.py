@@ -133,8 +133,10 @@ class IRCCat(irc.client.SimpleIRCClient):
         if message == "quit":
             self.connection.disconnect()
             sys.exit(0)
-        elif message == "try":
-            self.do_search("terry brooks")
+
+    def on_pubmsg(self, connection, event):
+        message = event.arguments[0]
+        self.log("{}: {}".format(event.source.nick, message))
 
     def on_notice(self, connection, event):
         self.log("got notice: {}".format(event))
@@ -143,7 +145,8 @@ class IRCCat(irc.client.SimpleIRCClient):
         message = event.arguments[0]
         if event.target == BOT_NICK:
             self.log("Got priv notice from {}: {}".format(event.source.nick, message))
-        if "returned no matches" in message:
+        if "returned no matches" in message or "Sorry" in message:
+            self.log("No matches")
             self.waitingForFile = "NoResults"
 
     def on_ctcp(self, connection, event):
@@ -314,11 +317,15 @@ def doSearch():
 
     # wait until we got the file
     while client.waitingForFile == "Search":
-        tLog("GUI", "Waiting for file...")
+        tLog("GUI", "Waiting for file... because client " + client.waitingForFile)
         time.sleep(1)
+
+    time.sleep(1)
     if client.waitingForFile == "NoResults":
         client.waitingForFile = None
         return
+    time.sleep(1)
+
     tLog("GUI", "Got file, going to process")
 
     available = processFile(client.latestFilename)
@@ -351,7 +358,7 @@ def doSearch():
         ncol = 0
         elements.append([])
         people = list(available[key])
-        label = Label(optionsList, justify=LEFT, anchor='w', text=key)
+        label = Label(optionsList, justify=LEFT, anchor='w', text=key[:150])
         label.configure(bg = darkerColor) if nrow % 2 == 0 else label.configure(bg = defaultColor)
 
         label.grid(row=nrow, column=ncol, sticky=W+E)
