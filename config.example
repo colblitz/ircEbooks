@@ -1,0 +1,13 @@
+# IRC Ebook Fetcher Configuration Example
+# Set these as environment variables before running
+
+# IRC Server Settings
+IRC_SERVER=irc.irchighway.net
+IRC_PORT=6667
+IRC_CHANNEL=#ebooks
+IRC_HANDLER=colblitz
+
+# Application Settings
+WORKING_DIR=ebooks
+DEBUG=false
+CONNECTION_WAIT_TIME=10  # Seconds to wait for IRC connection before showing GUI
